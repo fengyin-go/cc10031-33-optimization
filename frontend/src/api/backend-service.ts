@@ -106,3 +106,88 @@ export async function loadRecoveryStats(): Promise<Record<string, unknown>> {
   if (!response.ok) throw new Error('恢复状态查询失败')
   return await response.json()
 }
+
+// ---- 执行计划幂等与失败恢复 ----
+
+export type PlanStepInput = {
+  seq: number
+  name: string
+  type?: string
+  element?: string
+  params?: string
+  wait?: string
+  on_error?: string
+}
+
+export type PlanSubmitInput = {
+  bot_id: number
+  steps: PlanStepInput[]
+  bot_version?: string
+  conflict_policy?: 'cancel_old' | 'coexist'
+}
+
+/** 业务入口：幂等提交执行计划，联动刷新待办与步骤完成边界 */
+export async function submitExecutionPlan(input: PlanSubmitInput): Promise<Record<string, any>> {
+  const response = await request('/api/execution-plans/submit', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  if (!response.ok) throw new Error('执行计划提交失败')
+  return await response.json()
+}
+
+/** 按流程版本和计划查看步骤完成边界 */
+export async function loadPlanBoundaries(botId?: number): Promise<Record<string, any>> {
+  const query = botId ? `?bot_id=${botId}` : ''
+  const response = await request(`/api/execution-plans${query}`)
+  if (!response.ok) throw new Error('执行计划边界读取失败')
+  return await response.json()
+}
+
+/** 单个计划的步骤完成边界 */
+export async function loadPlanProgress(planKey: string): Promise<Record<string, any>> {
+  const response = await request(`/api/execution-plans/${encodeURIComponent(planKey)}/progress`)
+  if (!response.ok) throw new Error('计划进度读取失败')
+  return await response.json()
+}
+
+/** 中断恢复：只续做未完成任务 */
+export async function recoverPlan(planKey: string): Promise<Record<string, any>> {
+  const response = await request(`/api/execution-plans/${encodeURIComponent(planKey)}/recover`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw new Error('中断恢复失败')
+  return await response.json()
+}
+
+/** 取消计划未执行项 */
+export async function cancelExecutionPlan(planKey: string): Promise<Record<string, any>> {
+  const response = await request(`/api/execution-plans/${encodeURIComponent(planKey)}/cancel`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw new Error('计划取消失败')
+  return await response.json()
+}
+
+/** 失败清单（空态返回空列表） */
+export async function loadPlanFailures(): Promise<Record<string, any>> {
+  const response = await request('/api/execution-plans/failures/list')
+  if (!response.ok) throw new Error('失败清单读取失败')
+  return await response.json()
+}
+
+/** 重试中断异常任务 */
+export async function retryFailedTask(taskId: number): Promise<Record<string, any>> {
+  const response = await request(`/api/execution-plans/tasks/${taskId}/retry`, {
+    method: 'POST',
+  })
+  if (!response.ok) throw new Error('失败任务重试失败')
+  return await response.json()
+}
+
+/** 核对处理项对应的流程版本快照 */
+export async function loadTaskSnapshot(taskId: number): Promise<Record<string, any>> {
+  const response = await request(`/api/execution-plans/tasks/${taskId}/snapshot`)
+  if (!response.ok) throw new Error('版本快照核对失败')
+  return await response.json()
+}

@@ -359,6 +359,134 @@ class FailureRecovery:
 
 
 # ---------------------------------------------------------------------------
+# 执行计划存储 (ExecutionPlanStore)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PlanStepRecord:
+    """执行计划清单中的单个稳定步骤边界。"""
+    step_key: str
+    seq: int
+    step_id: int
+    name: str
+    step_type: str
+
+
+@dataclass
+class PlanRecord:
+    """执行计划：同一流程同一版本的一次编排提交，携带流程版本快照与步骤清单。"""
+    plan_key: str
+    bot_id: int
+    bot_version: str
+    total_steps: int
+    created_at: str
+    updated_at: str
+    manifest: list[PlanStepRecord]
+    snapshot: dict[str, Any]
+    canceled: bool = False
+    cancel_reason: str | None = None
+
+
+class ExecutionPlanStore:
+    """执行计划注册表：幂等编排与中断恢复的权威数据源。
+
+    唯一键：
+        - plan_key  由流程 ID + 流程版本拼接（执行计划身份）
+        - step_key  由流程 ID + 步骤序号拼接（稳定步骤边界）
+    任务队列再以 (plan_key, step_key) 复合唯一，保证重复提交复用编号、
+    不同版本计划的排队项可以区分。
+
+    用法::
+
+        plan, reused = store.execution_plans.upsert_plan(bot_id, version, steps, snapshot)
+        plan = store.execution_plans.get_plan("PLAN-1-v1.0.0")
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._plans: dict[str, PlanRecord] = {}
+
+    @staticmethod
+    def build_plan_key(bot_id: int, bot_version: str) -> str:
+        """执行计划键：流程 + 版本。"""
+        return f"PLAN-{bot_id}-v{bot_version}"
+
+    @staticmethod
+    def build_step_key(bot_id: int, seq: int) -> str:
+        """稳定步骤键：只由流程和步骤序号拼接，重提交流程内保持不变。"""
+        return f"BOT{bot_id}-S{int(seq):03d}"
+
+    def get_plan(self, plan_key: str) -> PlanRecord | None:
+        with self._lock:
+            return self._plans.get(plan_key)
+
+    def list_plans(self, bot_id: int | None = None) -> list[PlanRecord]:
+        with self._lock:
+            plans = list(self._plans.values())
+        if bot_id is not None:
+            plans = [p for p in plans if p.bot_id == bot_id]
+        return sorted(plans, key=lambda p: (p.bot_id, p.created_at))
+
+    def upsert_plan(
+        self,
+        bot_id: int,
+        bot_version: str,
+        steps: list[dict[str, Any]],
+        snapshot: dict[str, Any],
+    ) -> tuple[PlanRecord, bool]:
+        """登记或复用执行计划。
+
+        同一 plan_key 重复提交时直接复用既有计划与步骤清单（幂等），
+        返回 (计划, 是否复用既有计划)。
+        """
+        plan_key = self.build_plan_key(bot_id, bot_version)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            existing = self._plans.get(plan_key)
+            if existing is not None:
+                existing.updated_at = now
+                return existing, True
+
+            manifest = [
+                PlanStepRecord(
+                    step_key=self.build_step_key(bot_id, int(s.get("seq", 0))),
+                    seq=int(s.get("seq", 0)),
+                    step_id=int(s.get("step_id", 0)),
+                    name=str(s.get("name") or f"Step-{s.get('seq')}"),
+                    step_type=str(s.get("type") or ""),
+                )
+                for s in sorted(steps, key=lambda s: int(s.get("seq", 0)))
+            ]
+            plan = PlanRecord(
+                plan_key=plan_key,
+                bot_id=bot_id,
+                bot_version=bot_version,
+                total_steps=len(manifest),
+                created_at=now,
+                updated_at=now,
+                manifest=manifest,
+                snapshot=dict(snapshot),
+            )
+            self._plans[plan_key] = plan
+            return plan, False
+
+    def mark_canceled(self, plan_key: str, reason: str) -> bool:
+        with self._lock:
+            plan = self._plans.get(plan_key)
+            if plan is None:
+                return False
+            plan.canceled = True
+            plan.cancel_reason = reason
+            plan.updated_at = datetime.now(timezone.utc).isoformat()
+            return True
+
+    def clear(self) -> None:
+        """测试辅助：清空全部执行计划。"""
+        with self._lock:
+            self._plans.clear()
+
+
+# ---------------------------------------------------------------------------
 # 增强版 Store — 整合通道、脏数据、采集记录、恢复
 # ---------------------------------------------------------------------------
 
@@ -372,6 +500,7 @@ class Store:
         self.dirty_vault = DirtyDataVault()
         self.collect_records = CollectRecordStore()
         self.recovery = FailureRecovery()
+        self.execution_plans = ExecutionPlanStore()
 
     # ---- 基础数据操作 ----
 

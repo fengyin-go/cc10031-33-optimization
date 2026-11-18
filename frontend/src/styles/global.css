@@ -33,6 +33,13 @@ body { margin: 0; background: #f6f8fb; color: #1f2937; }
 .link { border: none; background: none; color: var(--brand); cursor: pointer; padding: 0; }
 .page-foot { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--muted); }
 .error-text { color: #b42318; }
+.hint { font-size: 13px; color: var(--muted); margin: 8px 0; }
+.card { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin: 12px 0; }
+.plan-submit h3, .card h3 { margin-top: 0; }
+.form-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
+.form-grid .filter-item { flex: 1 1 180px; }
+.form-grid input, .form-grid select { width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+.page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .modal-backdrop { position: fixed; inset: 0; background: rgb(15 23 42 / 35%); display: grid; place-items: center; padding: 20px; z-index: 20; }
 .modal { width: min(560px, 100%); max-height: 90vh; overflow: auto; background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 20px 50px rgb(15 23 42 / 20%); }
 .create-field { display: block; margin-bottom: 10px; }

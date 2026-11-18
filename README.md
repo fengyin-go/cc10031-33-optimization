@@ -79,5 +79,23 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 执行计划幂等与失败恢复
+
+步骤编排提交后由执行计划注册表（`app/store.py: ExecutionPlanStore`）固化计划身份、
+流程版本快照与稳定步骤清单，任务队列按复合唯一键消费：
+
+- 任务编号只由流程 ID 与步骤序号拼接（`TASK-{bot}-{seq}`），稳定步骤键为 `BOT{bot}-S{seq}`。
+- 执行计划键 `PLAN-{bot}-v{版本}` 与步骤键共同唯一；重复提交同一计划复用编号，
+  并发提交由服务端锁保证只生成一份排队项。
+- 每个排队项固化流程版本快照，调度前核对快照，漂移处理项不参与调度。
+- 同一流程多版本计划支持两种处理边界：`cancel_old`（最新版本取消旧版本未执行项）
+  与 `coexist`（两个计划各自完成，步骤键互不混淆）；已完成/已取消项保留清晰终态。
+- 中断恢复（`POST /api/execution-plans/{plan_key}/recover`）按计划版本和步骤键
+  只续做未完成任务：在途任务回队、缺失边界补建，已完成步骤不重新入队。
+- 失败任务必须登记失败原因，显式重试才重新排队；失败清单空态返回空列表。
+
+专属接口位于 `app/routers/execution_plan.py`，前端控制台为
+`frontend/src/views/ExecutionPlanConsole.vue`（导航「执行计划控制台」）。
+
 领域：数据工程
 子方向：数据采集、爬虫与RPA
